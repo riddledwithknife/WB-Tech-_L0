@@ -117,7 +117,7 @@ func restoreCacheFromDB(cache *OrdersCache, db *gorm.DB) error {
 
 func subscriptionHandler(cache *OrdersCache, db *gorm.DB) stan.MsgHandler {
 	return func(msg *stan.Msg) {
-		modelData, err := os.ReadFile("/Users/riddledwithknife/WB Tech _L0/Consumer/scheme.json")
+		modelData, err := os.ReadFile("./scheme.json")
 		if err != nil {
 			log.Println("Error reading scheme file: ", err)
 			return
