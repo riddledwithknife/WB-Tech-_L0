@@ -15,7 +15,7 @@ func main() {
 	}
 	defer sc.Close()
 
-	data, err := os.ReadFile("./order.json")
+	data, err := os.ReadFile("./order_example.json")
 	if err != nil {
 		log.Panicln("Error reading file:", err)
 	}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -105,16 +106,18 @@ func restoreCacheFromDB(cache *OrdersCache, db *gorm.DB) error {
 	}
 
 	for _, order := range orders {
-		jsonBytes, _ := json.MarshalIndent(order, "", "    ")
-		cache.Set(order.OrderUID, string(jsonBytes))
+		go func() {
+			jsonBytes, _ := json.MarshalIndent(order, "", "    ")
+			cache.Set(order.OrderUID, string(jsonBytes))
+		}()
 	}
 
 	return nil
 }
 
-func subscriptionHandler(db *gorm.DB) stan.MsgHandler {
+func subscriptionHandler(cache *OrdersCache, db *gorm.DB) stan.MsgHandler {
 	return func(msg *stan.Msg) {
-		modelData, err := os.ReadFile("./scheme.json")
+		modelData, err := os.ReadFile("/Users/riddledwithknife/WB Tech _L0/Consumer/scheme.json")
 		if err != nil {
 			log.Println("Error reading scheme file: ", err)
 			return
@@ -142,14 +145,22 @@ func subscriptionHandler(db *gorm.DB) stan.MsgHandler {
 		}
 
 		var order Order
-		if err := json.Unmarshal(msg.Data, &order); err != nil {
+		if err = json.Unmarshal(msg.Data, &order); err != nil {
 			log.Println("Failed to unmarshal order: ", err)
 			return
 		}
 
+		var formattedMsg bytes.Buffer
+		err = json.Indent(&formattedMsg, msg.Data, "", "    ")
+		if err != nil {
+			log.Println("Failed to format JSON msg for cache: ", err)
+			return
+		}
+		cache.Set(order.OrderUID, formattedMsg.String())
+
 		lock.Lock()
-		if err := db.Create(&order).Error; err != nil {
-			log.Println("Failed to create order: ", err)
+		if err = db.Create(&order).Error; err != nil {
+			log.Println("Failed to create db query: ", err)
 			return
 		}
 		lock.Unlock()
@@ -179,8 +190,6 @@ func getOrderHandler(cache *OrdersCache, db *gorm.DB) http.HandlerFunc {
 			http.Error(wr, err.Error(), http.StatusInternalServerError)
 			return
 		}
-
-		cache.Set(id, string(jsonBytes))
 
 		wr.Header().Set("Content-Type", "application/json")
 		wr.Write(jsonBytes)
@@ -215,7 +224,7 @@ func main() {
 		log.Fatalln("Failed to restore cache: ", err)
 	}
 
-	sub, err := sc.Subscribe("orders", subscriptionHandler(db), stan.DurableName("order-service"))
+	sub, err := sc.Subscribe("orders", subscriptionHandler(cache, db), stan.DurableName("order-service"))
 	if err != nil {
 		log.Fatalln("Failed to subscribe to order: ", err)
 	}
