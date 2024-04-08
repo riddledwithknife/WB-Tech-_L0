@@ -105,10 +105,7 @@ func restoreCacheFromDB(cache *OrdersCache, db *gorm.DB) error {
 	}
 
 	for _, order := range orders {
-		jsonBytes, err := json.MarshalIndent(order, "", "    ")
-		if err != nil {
-			return err
-		}
+		jsonBytes, _ := json.MarshalIndent(order, "", "    ")
 		cache.Set(order.OrderUID, string(jsonBytes))
 	}
 
@@ -205,18 +202,18 @@ func main() {
 		log.Fatalln("Failed to migrate db: ", err)
 	}
 
+	sc, err := stan.Connect("test-cluster", "order-service")
+	if err != nil {
+		log.Fatalln("Can't connect to cluster: ", err)
+	}
+	defer sc.Close()
+
 	cache := NewOrdersCache()
 
 	err = restoreCacheFromDB(cache, db)
 	if err != nil {
 		log.Fatalln("Failed to restore cache: ", err)
 	}
-
-	sc, err := stan.Connect("test-cluster", "order-service")
-	if err != nil {
-		log.Fatalln("Can't connect to cluster: ", err)
-	}
-	defer sc.Close()
 
 	sub, err := sc.Subscribe("orders", subscriptionHandler(db), stan.DurableName("order-service"))
 	if err != nil {
