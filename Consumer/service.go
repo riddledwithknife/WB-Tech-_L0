@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
 	"github.com/nats-io/stan.go"
+	"github.com/xeipuuv/gojsonschema"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -74,18 +76,43 @@ type Item struct {
 
 func subscriptionHandler(db *gorm.DB) stan.MsgHandler {
 	return func(msg *stan.Msg) {
+		modelData, err := os.ReadFile("./scheme.json")
+		if err != nil {
+			log.Println("Error reading scheme file: ", err)
+			return
+		}
+
+		modelLoader := gojsonschema.NewStringLoader(string(modelData))
+
+		jsonSchema, err := gojsonschema.NewSchema(modelLoader)
+		if err != nil {
+			log.Println("Error loading JSON schema from model: ", err)
+			return
+		}
+
+		msgLoader := gojsonschema.NewStringLoader(string(msg.Data))
+
+		result, err := jsonSchema.Validate(msgLoader)
+		if err != nil {
+			log.Println("Error when validating JSON: ", err)
+			return
+		}
+
+		if !result.Valid() {
+			log.Println("Invalid JSON schema")
+			return
+		}
+
 		var order Order
 		if err := json.Unmarshal(msg.Data, &order); err != nil {
-			log.Panicln("failed to unmarshal order: ", err)
+			log.Println("Failed to unmarshal order: ", err)
+			return
 		}
 
 		lock.Lock()
 		if err := db.Create(&order).Error; err != nil {
-			defer func() {
-				if r := recover(); r != nil {
-					log.Panicln("failed to create order: ", err)
-				}
-			}()
+			log.Println("Failed to create order: ", err)
+			return
 		}
 		lock.Unlock()
 	}
@@ -129,12 +156,14 @@ func getOrderHandler(cache *OrderCache, db *gorm.DB) http.HandlerFunc {
 		lock.Lock()
 		if err := db.Preload("Delivery").Preload("Payment").Preload("Items").First(&result, "order_uid = ?", id).Error; err != nil {
 			http.Error(wr, "Order not found", http.StatusNotFound)
+			return
 		}
 		lock.Unlock()
 
 		jsonBytes, err := json.MarshalIndent(result, "", "    ")
 		if err != nil {
 			http.Error(wr, err.Error(), http.StatusInternalServerError)
+			return
 		}
 
 		cache.Set(id, string(jsonBytes))
@@ -151,27 +180,27 @@ var (
 func main() {
 	db, err := gorm.Open(postgres.Open("host=localhost dbname=wb_service port=5432 sslmode=disable"), &gorm.Config{})
 	if err != nil {
-		log.Panicln("failed to connect to database: ", err)
+		log.Fatalln("Failed to connect to database: ", err)
 	}
 
 	err = db.AutoMigrate(&Order{}, &Delivery{}, &Payment{}, &Item{})
 	if err != nil {
-		log.Panicln("failed to migrate db: ", err)
+		log.Fatalln("Failed to migrate db: ", err)
 	}
 
 	sc, err := stan.Connect("test-cluster", "order-service")
 	if err != nil {
-		log.Panicln("Can't connect to cluster: ", err)
+		log.Fatalln("Can't connect to cluster: ", err)
 	}
 	defer sc.Close()
 
 	sub, err := sc.Subscribe("orders", subscriptionHandler(db), stan.DurableName("order-service"))
 	if err != nil {
-		log.Panicln("failed to subscribe to order: ", err)
+		log.Fatalln("Failed to subscribe to order: ", err)
 	}
 	defer sub.Close()
 
 	cache := NewOrderCache()
 	http.HandleFunc("/order", getOrderHandler(cache, db))
-	log.Panicln(http.ListenAndServe(":8080", nil))
+	log.Fatalln(http.ListenAndServe(":8080", nil))
 }
