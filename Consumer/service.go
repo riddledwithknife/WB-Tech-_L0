@@ -74,6 +74,47 @@ type Item struct {
 	Status      int    `json:"status"`
 }
 
+type OrdersCache struct {
+	cache map[string]string
+	mu    sync.RWMutex
+}
+
+func NewOrdersCache() *OrdersCache {
+	return &OrdersCache{
+		cache: make(map[string]string),
+	}
+}
+
+func (o *OrdersCache) Set(id string, data string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.cache[id] = data
+}
+
+func (o *OrdersCache) Get(id string) (string, bool) {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	data, ok := o.cache[id]
+	return data, ok
+}
+
+func restoreCacheFromDB(cache *OrdersCache, db *gorm.DB) error {
+	var orders []Order
+	if err := db.Preload("Delivery").Preload("Payment").Preload("Items").Find(&orders).Error; err != nil {
+		return err
+	}
+
+	for _, order := range orders {
+		jsonBytes, err := json.MarshalIndent(order, "", "    ")
+		if err != nil {
+			return err
+		}
+		cache.Set(order.OrderUID, string(jsonBytes))
+	}
+
+	return nil
+}
+
 func subscriptionHandler(db *gorm.DB) stan.MsgHandler {
 	return func(msg *stan.Msg) {
 		modelData, err := os.ReadFile("./scheme.json")
@@ -118,31 +159,7 @@ func subscriptionHandler(db *gorm.DB) stan.MsgHandler {
 	}
 }
 
-type OrderCache struct {
-	cache map[string]string
-	mu    sync.RWMutex
-}
-
-func NewOrderCache() *OrderCache {
-	return &OrderCache{
-		cache: make(map[string]string),
-	}
-}
-
-func (o *OrderCache) Set(id string, data string) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	o.cache[id] = data
-}
-
-func (o *OrderCache) Get(id string) (string, bool) {
-	o.mu.RLock()
-	defer o.mu.RUnlock()
-	data, ok := o.cache[id]
-	return data, ok
-}
-
-func getOrderHandler(cache *OrderCache, db *gorm.DB) http.HandlerFunc {
+func getOrderHandler(cache *OrdersCache, db *gorm.DB) http.HandlerFunc {
 	return func(wr http.ResponseWriter, req *http.Request) {
 		id := req.URL.Query().Get("id")
 
@@ -188,6 +205,13 @@ func main() {
 		log.Fatalln("Failed to migrate db: ", err)
 	}
 
+	cache := NewOrdersCache()
+
+	err = restoreCacheFromDB(cache, db)
+	if err != nil {
+		log.Fatalln("Failed to restore cache: ", err)
+	}
+
 	sc, err := stan.Connect("test-cluster", "order-service")
 	if err != nil {
 		log.Fatalln("Can't connect to cluster: ", err)
@@ -200,7 +224,6 @@ func main() {
 	}
 	defer sub.Close()
 
-	cache := NewOrderCache()
 	http.HandleFunc("/order", getOrderHandler(cache, db))
 	log.Fatalln(http.ListenAndServe(":8080", nil))
 }
