@@ -10,3 +10,7 @@ The service includes caching mechanisms to enhance performance and fault toleran
  4) Caching Mechanism: Implement in-memory caching of received data for improved performance. The service restores cache from the database in case of service failure.
  5) HTTP Server: Launch an HTTP server to serve cached data based on order IDs.
  6) User Interface: Develop a basic interface to display order data based on order IDs.
+
+## How to use
+ 1) Run Makefile, it will run docker compose cluster
+ 2) To check the work on the test data, you need to go to the docker and restart the producer container, it will send the data to the service.
