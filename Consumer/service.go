@@ -143,6 +143,7 @@ func subscriptionHandler(cache *OrdersCache, db *gorm.DB) stan.MsgHandler {
 			log.Println("Invalid JSON schema")
 			return
 		}
+		log.Println("Data validated")
 
 		var order Order
 		if err = json.Unmarshal(msg.Data, &order); err != nil {
@@ -157,6 +158,7 @@ func subscriptionHandler(cache *OrdersCache, db *gorm.DB) stan.MsgHandler {
 			return
 		}
 		cache.Set(order.OrderUID, formattedMsg.String())
+		log.Println("Successfully cached order: ", order.OrderUID)
 
 		lock.Lock()
 		if err = db.Create(&order).Error; err != nil {
@@ -164,6 +166,7 @@ func subscriptionHandler(cache *OrdersCache, db *gorm.DB) stan.MsgHandler {
 			return
 		}
 		lock.Unlock()
+		log.Println("Successfully stored order: ", order.OrderUID)
 	}
 }
 
@@ -174,6 +177,7 @@ func getOrderHandler(cache *OrdersCache, db *gorm.DB) http.HandlerFunc {
 		if jsonData, ok := cache.Get(id); ok {
 			wr.Header().Set("Content-Type", "application/json")
 			wr.Write([]byte(jsonData))
+			log.Println("Got order from cache: ", id)
 			return
 		}
 
@@ -193,6 +197,8 @@ func getOrderHandler(cache *OrdersCache, db *gorm.DB) http.HandlerFunc {
 
 		wr.Header().Set("Content-Type", "application/json")
 		wr.Write(jsonBytes)
+		log.Println("Got order from database: ", id)
+		return
 	}
 }
 
@@ -201,33 +207,39 @@ var (
 )
 
 func main() {
-	db, err := gorm.Open(postgres.Open("host=localhost dbname=wb_service port=5432 sslmode=disable"), &gorm.Config{})
+	db, err := gorm.Open(postgres.Open("host=postgres user=postgres password=postgres dbname=orders_db port=5432 sslmode=disable"), &gorm.Config{})
 	if err != nil {
 		log.Fatalln("Failed to connect to database: ", err)
 	}
+	log.Println("Connected to database")
 
 	err = db.AutoMigrate(&Order{}, &Delivery{}, &Payment{}, &Item{})
 	if err != nil {
 		log.Fatalln("Failed to migrate db: ", err)
 	}
+	log.Println("Migration complete")
 
-	sc, err := stan.Connect("test-cluster", "order-service")
+	sc, err := stan.Connect("test-cluster", "order-service", stan.NatsURL("nats-streaming:4222"))
 	if err != nil {
 		log.Fatalln("Can't connect to cluster: ", err)
 	}
+	log.Println("Connected to nats cluster")
 	defer sc.Close()
 
 	cache := NewOrdersCache()
+	log.Println("Cache initialized")
 
 	err = restoreCacheFromDB(cache, db)
 	if err != nil {
 		log.Fatalln("Failed to restore cache: ", err)
 	}
+	log.Println("Data restored from the database")
 
 	sub, err := sc.Subscribe("orders", subscriptionHandler(cache, db), stan.DurableName("order-service"))
 	if err != nil {
 		log.Fatalln("Failed to subscribe to order: ", err)
 	}
+	log.Println("Subscribed to orders")
 	defer sub.Close()
 
 	http.HandleFunc("/order", getOrderHandler(cache, db))

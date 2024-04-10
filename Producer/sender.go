@@ -72,16 +72,16 @@ type Item struct {
 }
 
 func main() {
-	sc, err := stan.Connect("test-cluster", "order-producer")
+	sc, err := stan.Connect("test-cluster", "order-Producer", stan.NatsURL("nats://nats-streaming:4222"))
 	if err != nil {
 		log.Fatal(err)
 	}
+	log.Println("Connected to nats cluster")
 	defer sc.Close()
 
 	data, _ := os.ReadFile("./order_example.json")
 
 	var order Order
-
 	json.Unmarshal(data, &order)
 
 	for i := range 20 {
@@ -89,6 +89,8 @@ func main() {
 		jsonBytes, _ := json.Marshal(order)
 
 		sc.Publish("orders", jsonBytes)
+
+		log.Println("Published order: ", order.OrderUID)
 	}
 
 	fmt.Println("Done Publishing")
