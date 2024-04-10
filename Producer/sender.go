@@ -72,7 +72,7 @@ type Item struct {
 }
 
 func main() {
-	sc, err := stan.Connect("test-cluster", "order-Producer", stan.NatsURL("nats://nats-streaming:4222"))
+	sc, err := stan.Connect("test-cluster", "order-producer", stan.NatsURL("nats://nats-streaming:4222"))
 	if err != nil {
 		log.Fatal(err)
 	}
