@@ -3,6 +3,7 @@ services:
     build:
       context: .
       dockerfile: Consumer/Dockerfile
+    image: wbtech_l0-consumer
     container_name: Consumer
     restart: always
     ports:
@@ -15,6 +16,7 @@ services:
     build:
       context: .
       dockerfile: Producer/Dockerfile
+    image: wbtech_l0-producer
     container_name: Producer
     depends_on:
       - nats-streaming

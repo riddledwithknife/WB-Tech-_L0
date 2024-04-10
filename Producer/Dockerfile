@@ -5,7 +5,7 @@ WORKDIR /usr/local/src
 COPY go.mod go.sum ./
 RUN go mod download
 
-COPY producer/* ./
+COPY Producer/* ./
 RUN go build -o ./sender ./sender.go
 
 FROM alpine AS runner-prod

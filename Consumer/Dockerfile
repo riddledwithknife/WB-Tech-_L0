@@ -5,7 +5,7 @@ WORKDIR /usr/local/src
 COPY go.mod go.sum ./
 RUN go mod download
 
-COPY consumer/* ./
+COPY Consumer/* ./
 RUN go build -o ./service ./service.go
 
 FROM alpine AS runner-cons
